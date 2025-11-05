@@ -7,7 +7,7 @@ from pymoo.optimize import minimize
 from pymoo.termination import get_termination
 from pymoo.visualization.scatter import Scatter
 from pymoo.core.callback import Callback
-import inspect
+import matplotlib.pyplot as plt
 
 from pymoo.operators.sampling.rnd import FloatRandomSampling
 from pymoo.operators.crossover.sbx import SBX
@@ -20,6 +20,7 @@ from pymoo.core.variable import Real
 
 from re21 import initialize_re21
 from re23 import initialize_re23
+from cre25 import initialize_cre25
 
 class ProgressCallback(Callback):
     def __init__(self, interval=10):
@@ -57,7 +58,7 @@ def create_solution_folder(base_path="problem_solution", project_name="project")
     os.makedirs(solution_path)
     return solution_path
 
-def save_log(res, algorithm, algorithm_params, callback, save_dir, seed):
+def save_log(res, algorithm, algorithm_params, callback, save_dir, seed, termination=None):
     """
     Speichert die Ergebnisse eines pymoo-Laufs in einer JSON-Datei.
     
@@ -73,11 +74,22 @@ def save_log(res, algorithm, algorithm_params, callback, save_dir, seed):
     n_obj = res.F.shape[1] if hasattr(res, "F") else None
     n_var = res.X.shape[1] if hasattr(res, "X") else None
 
+    termination_info = None
+    if termination is not None:
+        termination_info = {}
+        # Prüfe, ob n_gen gesetzt ist
+        if hasattr(termination, "n_max_gen"):
+            termination_info["n_gen"] = termination.n_max_gen
+        # Falls andere Typen, hier erweitern
+        # z.B. tol, time_limit, etc.
+        # termination_info["tol"] = getattr(termination, "tol", None)
+
     # Log-Daten zusammenstellen
     log_data = {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "algorithm": type(algorithm).__name__,
         "algorithm_parameters": algorithm_params,
+        "termination": termination_info,
         "n_objectives": n_obj,
         "n_variables": n_var,
         "generations": getattr(res, "n_gen", None),
@@ -128,12 +140,47 @@ def obj_to_str(v):
             else:
                 return f"{cls}()"
 
+def plot_progress(callback, save_dir):
+    """
+    Plottet die Entwicklung der Objectives über die Generationen
+    und den Mittelwert der Differenzen.
+    """
+    history = callback.history
+    generations = [entry["generation"] for entry in history]
+
+    # Alle Objectives extrahieren
+    n_obj = len([k for k in history[0] if k.startswith("best_f")])
+    all_values = np.array([[entry[f"best_f{i+1}"] for i in range(n_obj)] for entry in history])
+
+    # Differenzen berechnen
+    diffs = np.diff(all_values, axis=0)
+
+    # Mittelwert der Differenzen pro Generation
+    mean_diffs = np.mean(diffs, axis=1)
+
+    # Plot für jede Funktion
+    plt.figure(figsize=(10, 6))
+    for i in range(n_obj):
+        plt.plot(generations[1:], diffs[:, i], label=f"Δf{i+1}")
+    plt.plot(generations[1:], mean_diffs, label="Mittelwert Δf", color="black", linewidth=2, linestyle="--")
+    plt.xlabel("Generation")
+    plt.ylabel("Differenz der Objectives")
+    plt.title("Fortschritt der Objectives über die Generationen")
+    plt.legend()
+    plt.grid(True)
+
+    plot_path = os.path.join(save_dir, "progress.png")
+    plt.savefig(plot_path)
+    plt.close()
+    print("Progress Plot gespeichert:", plot_path)
+    return plot_path
+
 def main():
     # Set random seed for reproducibility
     seed = 1
     np.random.seed(seed)
 
-    problem_name = "re23"
+    problem_name = "cre25"
     save_dir = create_solution_folder("problem_solutions", problem_name)
 
     init_func_name = f"initialize_{problem_name}"
@@ -155,7 +202,7 @@ def main():
     print(params_str)
     
     # Termination criterion
-    termination = get_termination("n_gen", 100)
+    termination = get_termination("n_gen", 500)
     
     # Progress Callback to get feedback during optimization
     callback = ProgressCallback(interval=10)
@@ -169,12 +216,12 @@ def main():
                    verbose=False)
 
     # Save Scatter Plot
-    scatter = Scatter(title="RE21 - NSGA-II (approximierte Pareto-Front)")
+    scatter = Scatter(title=f"{problem_name} - NSGA-II (approximierte Pareto-Front)")
     scatter.add(res.F)
     scatter_path = os.path.join(save_dir, "scatter.png")
     scatter.save(scatter_path)
 
-    log_path = save_log(res, algorithm, params_str, callback, save_dir, seed)
+    log_path = save_log(res, algorithm, params_str, callback, save_dir, seed, termination)
 
     print(f"\nErgebnisse gespeichert in: {save_dir}")
     print("Scatter Plot:", scatter_path)
