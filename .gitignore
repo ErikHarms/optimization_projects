@@ -10,6 +10,7 @@ __pycache__/
 
 # Problem solutions folder
 problem_solutions/
+reproblems/
 
 # Distribution / packaging
 build/
