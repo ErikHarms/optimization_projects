@@ -9,6 +9,7 @@ from pymoo.visualization.scatter import Scatter
 from pymoo.core.callback import Callback
 import matplotlib.pyplot as plt
 
+from pymoo.util.nds.non_dominated_sorting import NonDominatedSorting
 from pymoo.operators.sampling.rnd import FloatRandomSampling
 from pymoo.operators.crossover.sbx import SBX
 from pymoo.operators.mutation.pm import PM
@@ -16,11 +17,13 @@ from pymoo.operators.selection.tournament import TournamentSelection
 from pymoo.operators.survival.rank_and_crowding import RankAndCrowding
 from pymoo.algorithms.moo.nsga2 import binary_tournament
 from pymoo.core.variable import Real
+from pymoo.visualization.scatter import Scatter
 
 
 from re21 import initialize_re21
 from re23 import initialize_re23
 from cre25 import initialize_cre25
+from cre51 import initialize_cre51
 
 class ProgressCallback(Callback):
     def __init__(self, interval=10):
@@ -143,7 +146,7 @@ def obj_to_str(v):
 def plot_progress(callback, save_dir):
     """
     Plottet die Entwicklung der Objectives über die Generationen
-    und den Mittelwert der Differenzen.
+    mit logarithmischer Skala, um kleine Differenzen sichtbar zu machen.
     """
     history = callback.history
     generations = [entry["generation"] for entry in history]
@@ -155,19 +158,26 @@ def plot_progress(callback, save_dir):
     # Differenzen berechnen
     diffs = np.diff(all_values, axis=0)
 
+    # Absolutwerte für Log-Skala
+    diffs_abs = np.abs(diffs)
+    diffs_abs[diffs_abs == 0] = 1e-6  # kleine Werte vermeiden log(0)
+
     # Mittelwert der Differenzen pro Generation
-    mean_diffs = np.mean(diffs, axis=1)
+    mean_diffs = np.mean(diffs_abs, axis=1)
 
     # Plot für jede Funktion
     plt.figure(figsize=(10, 6))
     for i in range(n_obj):
-        plt.plot(generations[1:], diffs[:, i], label=f"Δf{i+1}")
+        plt.plot(generations[1:], diffs_abs[:, i], label=f"Δf{i+1}")
     plt.plot(generations[1:], mean_diffs, label="Mittelwert Δf", color="black", linewidth=2, linestyle="--")
+
     plt.xlabel("Generation")
-    plt.ylabel("Differenz der Objectives")
-    plt.title("Fortschritt der Objectives über die Generationen")
+    plt.ylabel("Absolute Differenz der Objectives")
+    plt.yscale("log")
+    plt.yticks([1e-3, 1e-2, 1e-1], ["0.001", "0.01", "0.1"])
+    plt.title("Fortschritt der Objectives über die Generationen (log-Skala)")
     plt.legend()
-    plt.grid(True)
+    plt.grid(True, which="both", linestyle="--", linewidth=0.5)
 
     plot_path = os.path.join(save_dir, "progress.png")
     plt.savefig(plot_path)
@@ -175,12 +185,76 @@ def plot_progress(callback, save_dir):
     print("Progress Plot gespeichert:", plot_path)
     return plot_path
 
+def save_adaptive_scatter_plot(res, save_dir):
+    n_obj = res.F.shape[1]
+    scatter_path = os.path.join(save_dir, "scatter.png")
+    width = min(6 + n_obj * 3, 20)
+    height = min(5 + n_obj * 2, 15)
+
+    # Pareto-Front bestimmen (erste Front)
+    fronts = NonDominatedSorting().do(res.F, return_rank=True)
+    ranks = fronts[1]  # Rückgabe: (fronts, ranks)
+    pareto_indices = np.where(ranks == 0)[0]  # Front 0 = Pareto-Front
+
+    # Ausgewählte Punkte: nur die ersten 10
+    selected_indices = pareto_indices[:10]
+    remaining_indices = np.setdiff1d(np.arange(res.F.shape[0]), selected_indices)
+
+    if n_obj <= 3:
+        from pymoo.visualization.scatter import Scatter
+        scatter = Scatter(figsize=(width, height))
+
+        # Alle Punkte hinzufügen
+        scatter.add(res.F[remaining_indices], s=20, color="blue")  # Alle anderen Punkte
+        scatter.add(res.F[selected_indices], s=50, color="red", marker="o", edgecolor="black", label="Top 10 Pareto")
+        scatter.do()
+
+        # Nummerierung der Top 10
+        for i, idx in enumerate(selected_indices):
+            point = res.F[idx]
+            if n_obj == 2:
+                scatter.ax.text(point[0], point[1], str(i + 1), color="black", fontsize=10, fontweight="bold")
+            elif n_obj == 3:
+                scatter.ax.text(point[0], point[1], point[2], str(i + 1), color="black", fontsize=10, fontweight="bold")
+
+        # Achsenbeschriftungen
+        scatter.ax.set_xlabel("F 1")
+        scatter.ax.set_ylabel("F 2")
+        if n_obj == 3:
+            scatter.ax.set_zlabel("F 3")
+        plt.tight_layout()
+        scatter.fig.savefig(scatter_path, dpi=300, bbox_inches="tight")
+
+    else:
+        # Scatter-Matrix für n_obj > 3
+        fig, axes = plt.subplots(n_obj, n_obj, figsize=(width, height))
+        for i in range(n_obj):
+            for j in range(n_obj):
+                ax = axes[i, j]
+                if i != j:
+                    # Alle Punkte plotten
+                    ax.scatter(res.F[remaining_indices, j], res.F[remaining_indices, i], s=20, color="blue")
+                    ax.scatter(res.F[selected_indices, j], res.F[selected_indices, i], s=50, color="red", edgecolor="black")
+                    # Top-10 nummerieren
+                    for k, idx in enumerate(selected_indices):
+                        ax.text(res.F[idx, j], res.F[idx, i], str(k + 1), color="black", fontsize=8, fontweight="bold")
+                    ax.set_xlabel(f"F {j+1}")
+                    ax.set_ylabel(f"F {i+1}")
+                else:
+                    ax.axis("off")  # Diagonalplots ausblenden
+
+        plt.tight_layout()
+        fig.savefig(scatter_path, dpi=300, bbox_inches="tight")
+
+    print(f"Scatter Plot gespeichert unter: {scatter_path}")
+    return scatter_path
+
 def main():
     # Set random seed for reproducibility
     seed = 1
     np.random.seed(seed)
 
-    problem_name = "cre25"
+    problem_name = "re21"
     save_dir = create_solution_folder("problem_solutions", problem_name)
 
     init_func_name = f"initialize_{problem_name}"
@@ -202,7 +276,7 @@ def main():
     print(params_str)
     
     # Termination criterion
-    termination = get_termination("n_gen", 500)
+    termination = get_termination("n_gen", 200)
     
     # Progress Callback to get feedback during optimization
     callback = ProgressCallback(interval=10)
@@ -216,15 +290,14 @@ def main():
                    verbose=False)
 
     # Save Scatter Plot
-    scatter = Scatter(title=f"{problem_name} - NSGA-II (approximierte Pareto-Front)")
-    scatter.add(res.F)
-    scatter_path = os.path.join(save_dir, "scatter.png")
-    scatter.save(scatter_path)
+    save_adaptive_scatter_plot(res, save_dir)
 
     log_path = save_log(res, algorithm, params_str, callback, save_dir, seed, termination)
 
+    progress_plot_path = plot_progress(callback, save_dir)
+
     print(f"\nErgebnisse gespeichert in: {save_dir}")
-    print("Scatter Plot:", scatter_path)
+    print("Konvergenz Plot:", progress_plot_path)
     print("Log Datei:", log_path)
 
 if __name__ == "__main__":
