@@ -18,6 +18,7 @@ from pymoo.operators.survival.rank_and_crowding import RankAndCrowding
 from pymoo.algorithms.moo.nsga2 import binary_tournament
 from pymoo.core.variable import Real
 from pymoo.visualization.scatter import Scatter
+from pymoo.indicators.hv import Hypervolume
 
 
 from re21 import initialize_re21
@@ -61,7 +62,7 @@ def create_solution_folder(base_path="problem_solution", project_name="project")
     os.makedirs(solution_path)
     return solution_path
 
-def save_log(res, algorithm, algorithm_params, callback, save_dir, seed, termination=None):
+def save_log(res, algorithm, algorithm_params, callback, save_dir, seed, termination=None, ref_point=None):
     """
     Speichert die Ergebnisse eines pymoo-Laufs in einer JSON-Datei.
     
@@ -86,6 +87,12 @@ def save_log(res, algorithm, algorithm_params, callback, save_dir, seed, termina
         # Falls andere Typen, hier erweitern
         # z.B. tol, time_limit, etc.
         # termination_info["tol"] = getattr(termination, "tol", None)
+    
+    # Hypervolume berechnen, falls Referenzpunkt gegeben
+    hv_value = None
+    if ref_point is not None and hasattr(res, "F") and res.F.size > 0:
+        hv = Hypervolume(ref_point=np.array(ref_point))
+        hv_value = float(hv.calc(res.F))
 
     # Log-Daten zusammenstellen
     log_data = {
@@ -100,6 +107,7 @@ def save_log(res, algorithm, algorithm_params, callback, save_dir, seed, termina
         "pareto_solutions": int(res.F.shape[0]) if hasattr(res, "F") else None,
         "F_first_10": res.F[:10].tolist() if hasattr(res, "F") else None,
         "X_first_10": res.X[:10].tolist() if hasattr(res, "X") else None,
+        "hypervolume": hv_value,
         "progress": callback.history if hasattr(callback, "history") else None
     }
 
