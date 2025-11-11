@@ -25,6 +25,7 @@ from re21 import initialize_re21
 from re23 import initialize_re23
 from cre25 import initialize_cre25
 from cre51 import initialize_cre51
+from tre01 import initialize_tre01
 
 class ProgressCallback(Callback):
     def __init__(self, interval=10):
@@ -262,7 +263,7 @@ def main():
     seed = 1
     np.random.seed(seed)
 
-    problem_name = "re21"
+    problem_name = "tre01"
     save_dir = create_solution_folder("problem_solutions", problem_name)
 
     init_func_name = f"initialize_{problem_name}"
